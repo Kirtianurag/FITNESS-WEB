@@ -57,8 +57,8 @@ const Quests = () => {
     const fetchData = async () => {
       try {
         const [questsRes, workoutsRes] = await Promise.all([
-          axios.get('http://localhost:5000/api/quests'),
-          axios.get('http://localhost:5000/api/workouts')
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/quests`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/workouts`)
         ]);
         setQuests(questsRes.data);
         setWorkouts(workoutsRes.data);
@@ -129,7 +129,7 @@ const Quests = () => {
     const timeBonus = Math.floor(timeElapsed / 60) * 10;
     const totalXp = baseReward + timeBonus;
     try {
-      await axios.post('http://localhost:5000/api/users/xp-update', { xpToAdd: totalXp });
+      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/xp-update`, { xpToAdd: totalXp });
       addNotification({ title: 'Mission Mastered! 🏆', message: `You earned ${totalXp} XP in ${formatTime(timeElapsed)}.`, time: 'Just now', type: 'achievement' });
       setActiveMission(null);
       localStorage.removeItem('activeMission');

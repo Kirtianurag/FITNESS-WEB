@@ -22,7 +22,7 @@ const Profile = () => {
   const handleUpdate = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await axios.put('http://localhost:5000/api/users/profile', formData);
+      const { data } = await axios.put(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/profile`, formData);
       login(data); // Update local auth state
       setIsEditing(false);
       addNotification({

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
-const socket = io('http://localhost:5000');
+const socket = io(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}`);
 
 const Chat = () => {
   const { user } = useAuth();
@@ -21,7 +21,7 @@ const Chat = () => {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const { data } = await axios.get('http://localhost:5000/api/users');
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users`);
         setUsers(data);
       } catch (err) {
         console.error(err);
@@ -37,7 +37,7 @@ const Chat = () => {
 
       const fetchMessages = async () => {
         try {
-          const { data } = await axios.get(`http://localhost:5000/api/users/messages/${activeChat._id}`);
+          const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${activeChat._id}`);
           // Map backend structure to frontend structure
           const formatted = data.map(m => ({
             sender: m.sender === user._id ? user.username : activeChat.username,
@@ -98,7 +98,7 @@ const Chat = () => {
       socket.emit('send_message', msgData);
       
       // Save to database
-      await axios.post('http://localhost:5000/api/users/messages', {
+      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages`, {
         recipientId: activeChat._id,
         content: input,
         room

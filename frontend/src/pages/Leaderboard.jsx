@@ -50,8 +50,8 @@ const Leaderboard = () => {
     const fetchData = async () => {
       try {
         const [lbRes, statsRes] = await Promise.all([
-          axios.get('http://localhost:5000/api/workouts/leaderboard'),
-          axios.get('http://localhost:5000/api/stats/global')
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/workouts/leaderboard`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/stats/global`)
         ]);
         setLeaderboard(lbRes.data);
         setGlobalStats(statsRes.data);

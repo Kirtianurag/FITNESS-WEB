@@ -17,8 +17,8 @@ const Analytics = () => {
     const fetchData = async () => {
       try {
         const [workoutsRes, compRes] = await Promise.all([
-          axios.get('http://localhost:5000/api/workouts'),
-          axios.get('http://localhost:5000/api/stats/comparison')
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/workouts`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/stats/comparison`)
         ]);
 
         const allWorkouts = workoutsRes.data;

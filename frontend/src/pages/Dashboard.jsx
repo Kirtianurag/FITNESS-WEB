@@ -18,9 +18,9 @@ const Dashboard = () => {
     const fetchData = async () => {
       try {
         const [workoutsRes, profileRes, questsRes] = await Promise.all([
-          axios.get('http://localhost:5000/api/workouts'),
-          axios.get('http://localhost:5000/api/auth/profile'),
-          axios.get('http://localhost:5000/api/quests')
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/workouts`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/profile`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/quests`)
         ]);
         setWorkouts(workoutsRes.data);
         updateUserInfo(profileRes.data);
@@ -36,7 +36,7 @@ const Dashboard = () => {
   const handleLogWorkout = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await axios.post('http://localhost:5000/api/workouts', formData);
+      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/workouts`, formData);
       setWorkouts([data.workout, ...workouts]);
       updateUserInfo(data.user);
       
@@ -55,7 +55,7 @@ const Dashboard = () => {
 
   const handleClaimXP = async (questId) => {
     try {
-      const { data } = await axios.post(`http://localhost:5000/api/quests/claim/${questId}`);
+      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/quests/claim/${questId}`);
       updateUserInfo(data.user);
       addNotification({
         title: 'Reward Claimed! 🏆',
@@ -64,7 +64,7 @@ const Dashboard = () => {
         type: 'achievement'
       });
       // Refresh quests to update UI
-      const questsRes = await axios.get('http://localhost:5000/api/quests');
+      const questsRes = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/quests`);
       setQuests(questsRes.data.filter(q => q.type?.toLowerCase() === 'daily'));
     } catch (err) {
       console.error("CLAIM ERROR:", err);

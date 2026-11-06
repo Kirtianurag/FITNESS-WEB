@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { Send, Search, Users, Hash, MessageSquare, Flame } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
-
-const socket = io(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}`);
+import { socket } from '../socket';
 
 const Chat = () => {
   const { user } = useAuth();
@@ -43,7 +41,9 @@ const Chat = () => {
   useEffect(() => {
     if (!activeChat || !user?._id) return;
 
-    const newRoom = [user._id, activeChat._id].sort().join('_');
+    const currentUserId = String(user._id);
+    const partnerId = String(activeChat._id);
+    const newRoom = [currentUserId, partnerId].sort().join('_');
 
     if (currentRoomRef.current && currentRoomRef.current !== newRoom) {
       socket.emit('leave_room', currentRoomRef.current);
@@ -53,14 +53,15 @@ const Chat = () => {
 
     const fetchMessages = async () => {
       try {
-        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${activeChat._id}`);
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${partnerId}`);
         const formatted = data.map(m => ({
-          sender: m.sender === user._id ? user.username : activeChat.username,
-          senderId: m.sender,
-          recipientId: m.receiver,
+          _id: m._id,
+          sender: String(m.sender) === currentUserId ? user.username : activeChat.username,
+          senderId: String(m.sender),
+          recipientId: String(m.receiver),
           content: m.content,
           time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          avatar: m.sender === user._id ? user.avatar : activeChat.avatar
+          avatar: String(m.sender) === currentUserId ? user.avatar : activeChat.avatar
         }));
         setMessages(formatted);
       } catch (err) {
@@ -74,18 +75,32 @@ const Chat = () => {
   useEffect(() => {
     if (!user?._id) return;
 
-    // Join personal room for real-time delivery even when not in chat room
-    socket.emit('join_personal_room', user._id);
+    const currentUserId = String(user._id);
+
+    const joinUser = () => {
+      socket.emit('join_personal_room', currentUserId);
+      if (activeChatRef.current) {
+        const r = [currentUserId, String(activeChatRef.current._id)].sort().join('_');
+        socket.emit('join_room', r);
+      }
+    };
+
+    if (socket.connected) {
+      joinUser();
+    }
+    socket.on('connect', joinUser);
 
     const handleReceiveMessage = (data) => {
       const active = activeChatRef.current;
-      
-      // 1. If currently in conversation with this sender, display message live
-      if (active && (data.senderId === active._id || data.senderId === user._id)) {
+      const dataSenderId = String(data.senderId || '');
+      const dataRecipientId = String(data.recipientId || '');
+
+      // 1. If currently in conversation with this person, display message live
+      if (active && (dataSenderId === String(active._id) || dataSenderId === currentUserId)) {
         setMessages((prev) => {
           const isDuplicate = prev.some(m => 
-            (m._id && data._id && m._id === data._id) ||
-            (m.senderId === data.senderId && m.content === data.content && m.time === data.time)
+            (m._id && data._id && String(m._id) === String(data._id)) ||
+            (String(m.senderId) === dataSenderId && m.content === data.content && m.time === data.time)
           );
           if (isDuplicate) return prev;
           return [...prev, data];
@@ -93,12 +108,12 @@ const Chat = () => {
       }
 
       // 2. Bring the conversation partner to the TOP of the chat list
-      const partnerId = data.senderId === user._id ? data.recipientId : data.senderId;
+      const partnerId = dataSenderId === currentUserId ? dataRecipientId : dataSenderId;
       setUsers((prevUsers) => {
-        const partnerIndex = prevUsers.findIndex(u => u._id === partnerId);
+        const partnerIndex = prevUsers.findIndex(u => String(u._id) === partnerId);
         if (partnerIndex === -1) return prevUsers;
         const partner = prevUsers[partnerIndex];
-        const isCurrentActive = activeChatRef.current && activeChatRef.current._id === partnerId;
+        const isCurrentActive = activeChatRef.current && String(activeChatRef.current._id) === partnerId;
 
         const updatedPartner = {
           ...partner,
@@ -107,7 +122,7 @@ const Chat = () => {
           unreadCount: isCurrentActive ? 0 : ((partner.unreadCount || 0) + 1)
         };
 
-        const others = prevUsers.filter(u => u._id !== partnerId);
+        const others = prevUsers.filter(u => String(u._id) !== partnerId);
         return [updatedPartner, ...others];
       });
     };
@@ -127,6 +142,7 @@ const Chat = () => {
     socket.on('user_typing', handleUserTyping);
 
     return () => {
+      socket.off('connect', joinUser);
       socket.off('receive_message', handleReceiveMessage);
       socket.off('user_typing', handleUserTyping);
     };
@@ -139,22 +155,24 @@ const Chat = () => {
   const handleSelectChat = (u) => {
     setActiveChat(u);
     // Clear unread count for this user
-    setUsers((prev) => prev.map(item => item._id === u._id ? { ...item, unreadCount: 0 } : item));
+    setUsers((prev) => prev.map(item => String(item._id) === String(u._id) ? { ...item, unreadCount: 0 } : item));
   };
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !activeChat) return;
+    if (!input.trim() || !activeChat || !user?._id) return;
 
-    const room = [user._id, activeChat._id].sort().join('_');
+    const currentUserId = String(user._id);
+    const partnerId = String(activeChat._id);
+    const room = [currentUserId, partnerId].sort().join('_');
     const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const contentToSend = input.trim();
 
     const msgData = {
       room,
       sender: user.username,
-      senderId: user._id,
-      recipientId: activeChat._id,
+      senderId: currentUserId,
+      recipientId: partnerId,
       content: contentToSend,
       time: currentTime,
       avatar: user.avatar
@@ -165,19 +183,26 @@ const Chat = () => {
 
     // Save to database
     axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages`, {
-      recipientId: activeChat._id,
+      recipientId: partnerId,
       content: contentToSend,
       room
     }).catch(err => console.error(err));
 
-    // Update messages locally
-    setMessages((prev) => [...prev, msgData]);
+    // Update messages locally (with duplicate guard)
+    setMessages((prev) => {
+      const exists = prev.some(m => 
+        String(m.senderId) === currentUserId && m.content === contentToSend && m.time === currentTime
+      );
+      if (exists) return prev;
+      return [...prev, msgData];
+    });
+
     setInput('');
     socket.emit('typing', { room, username: user.username, isTyping: false });
 
     // Move active chat partner to the top of the sidebar list
     setUsers((prevUsers) => {
-      const partner = prevUsers.find(u => u._id === activeChat._id);
+      const partner = prevUsers.find(u => String(u._id) === partnerId);
       if (!partner) return prevUsers;
       const updatedPartner = {
         ...partner,
@@ -185,15 +210,15 @@ const Chat = () => {
         lastMessageTime: currentTime,
         unreadCount: 0
       };
-      const others = prevUsers.filter(u => u._id !== activeChat._id);
+      const others = prevUsers.filter(u => String(u._id) !== partnerId);
       return [updatedPartner, ...others];
     });
   };
 
   const handleTyping = (e) => {
     setInput(e.target.value);
-    if (activeChat) {
-      const room = [user._id, activeChat._id].sort().join('_');
+    if (activeChat && user?._id) {
+      const room = [String(user._id), String(activeChat._id)].sort().join('_');
       socket.emit('typing', { room, username: user.username, isTyping: e.target.value.length > 0 });
     }
   };
@@ -234,7 +259,7 @@ const Chat = () => {
                   borderRadius: '16px', 
                   cursor: 'pointer',
                   transition: 'all 0.2s',
-                  background: activeChat?._id === u._id ? 'var(--primary-light)' : 'transparent',
+                  background: String(activeChat?._id) === String(u._id) ? 'var(--primary-light)' : 'transparent',
                   marginBottom: '8px'
                 }}
                 className="user-list-item"
@@ -248,7 +273,7 @@ const Chat = () => {
                     <span style={{ 
                       fontSize: '15px', 
                       fontWeight: '800', 
-                      color: activeChat?._id === u._id ? 'var(--primary)' : '#1e293b',
+                      color: String(activeChat?._id) === String(u._id) ? 'var(--primary)' : '#1e293b',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis'

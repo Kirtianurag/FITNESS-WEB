@@ -28,6 +28,7 @@ exports.getAllUsers = async (req, res) => {
 
     const formattedUsers = users.map(u => {
       const uObj = u.toObject();
+      uObj._id = u._id.toString();
       const lastInfo = lastMessageMap[u._id.toString()];
       if (lastInfo) {
         uObj.lastMessage = lastInfo.content;

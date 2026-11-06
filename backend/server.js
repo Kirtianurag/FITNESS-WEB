@@ -31,48 +31,52 @@ io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
   socket.on('join_personal_room', (userId) => {
-    socket.join(userId);
-    console.log(`User ${socket.id} joined personal room: ${userId}`);
+    if (!userId) return;
+    const uid = String(userId);
+    socket.join(uid);
+    console.log(`User ${socket.id} joined personal room: ${uid}`);
   });
 
   socket.on('join_room', (room) => {
-    socket.join(room);
-    console.log(`User ${socket.id} joined room: ${room}`);
+    if (!room) return;
+    const r = String(room);
+    socket.join(r);
+    console.log(`User ${socket.id} joined room: ${r}`);
   });
 
   socket.on('leave_room', (room) => {
-    socket.leave(room);
-    console.log(`User ${socket.id} left room: ${room}`);
+    if (!room) return;
+    const r = String(room);
+    socket.leave(r);
+    console.log(`User ${socket.id} left room: ${r}`);
   });
 
   socket.on('send_message', (data) => {
     console.log(`Message sent in room ${data.room} from ${data.senderId} to ${data.recipientId}`);
     
-    // Broadcast to room and/or recipient personal room
-    const targets = [];
-    if (data.room) targets.push(data.room);
-    if (data.recipientId) targets.push(data.recipientId);
+    const room = data.room ? String(data.room) : '';
+    const recipientId = data.recipientId ? String(data.recipientId) : '';
 
-    if (targets.length > 0) {
-      // socket.to(targets) sends to everyone in data.room and recipient personal room
-      // Socket.IO deduplicates automatically so user only gets it once
-      socket.to(targets).emit('receive_message', data);
+    // Broadcast to the chat room
+    if (room) {
+      io.to(room).emit('receive_message', data);
     }
     
-    // Also trigger notification dot in recipient's personal room
-    if (data.recipientId) {
-      socket.to(data.recipientId).emit('new_message_notification', data);
+    // Also deliver to recipient's personal room
+    if (recipientId && recipientId !== room) {
+      io.to(recipientId).emit('receive_message', data);
+      io.to(recipientId).emit('new_message_notification', data);
     }
   });
 
   socket.on('typing', (data) => {
     if (data.room) {
-      socket.to(data.room).emit('user_typing', data);
+      socket.to(String(data.room)).emit('user_typing', data);
     }
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected');
+    console.log('User disconnected:', socket.id);
   });
 });
 

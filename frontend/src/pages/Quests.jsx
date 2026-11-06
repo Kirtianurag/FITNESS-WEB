@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Droplets, Footprints, Flame, Swords, ChevronRight, Target, Trophy, X, Shield, Zap, CheckCircle2, Clock, Timer, Lock, MapPin, Wind, Plus, Edit2 } from 'lucide-react';
 import axios from 'axios';
 import { useNotifications } from '../context/NotificationContext';
+import { useAuth } from '../context/AuthContext';
 
 const Quests = () => {
+  const { user, updateUserInfo } = useAuth();
   const [quests, setQuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuest, setSelectedQuest] = useState(null);
@@ -125,16 +127,31 @@ const Quests = () => {
   };
 
   const handleEndMission = async () => {
-    const baseReward = parseInt(activeMission.reward);
+    if (!activeMission) return;
+    const baseReward = parseInt(activeMission.reward) || 300;
     const timeBonus = Math.floor(timeElapsed / 60) * 10;
     const totalXp = baseReward + timeBonus;
     try {
-      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/xp-update`, { xpToAdd: totalXp });
-      addNotification({ title: 'Mission Mastered! 🏆', message: `You earned ${totalXp} XP in ${formatTime(timeElapsed)}.`, time: 'Just now', type: 'achievement' });
+      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/xp-update`, { xpToAdd: totalXp });
+      if (data?.user) {
+        updateUserInfo(data.user);
+      } else if (data?.xp) {
+        updateUserInfo({ xp: data.xp, level: data.level });
+      }
+      addNotification({ 
+        title: 'Mission Mastered! 🏆', 
+        message: `You earned ${totalXp} XP in ${formatTime(timeElapsed)}.`, 
+        time: 'Just now', 
+        type: 'achievement' 
+      });
       setActiveMission(null);
       localStorage.removeItem('activeMission');
-      window.location.reload(); 
-    } catch (err) { console.error(err); }
+      setTimeElapsed(0);
+    } catch (err) { 
+      console.error('Mission complete error:', err);
+      const msg = err.response?.data?.message || 'Could not complete mission';
+      alert(msg);
+    }
   };
 
   const renderQuestCard = (bp, idx) => {

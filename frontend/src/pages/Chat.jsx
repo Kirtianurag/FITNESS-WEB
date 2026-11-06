@@ -69,6 +69,27 @@ const Chat = () => {
       }
     };
     fetchMessages();
+
+    // Auto-sync fallback every 3.5 seconds so user never has to leave and re-enter chat to refresh
+    const syncInterval = setInterval(async () => {
+      try {
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${partnerId}`);
+        setMessages((prev) => {
+          if (data.length === prev.length) return prev;
+          return data.map(m => ({
+            _id: m._id,
+            sender: String(m.sender) === currentUserId ? user.username : activeChat.username,
+            senderId: String(m.sender),
+            recipientId: String(m.receiver),
+            content: m.content,
+            time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            avatar: String(m.sender) === currentUserId ? user.avatar : activeChat.avatar
+          }));
+        });
+      } catch (e) {}
+    }, 3500);
+
+    return () => clearInterval(syncInterval);
   }, [activeChat?._id, user?._id]);
 
   // Persistent Socket Listeners for Real-Time Messages and Typing
@@ -96,11 +117,17 @@ const Chat = () => {
       const dataRecipientId = String(data.recipientId || '');
 
       // 1. If currently in conversation with this person, display message live
-      if (active && (dataSenderId === String(active._id) || dataSenderId === currentUserId)) {
+      const isForActiveChat = active && (
+        (dataSenderId === String(active._id) && dataRecipientId === currentUserId) ||
+        (dataSenderId === currentUserId && dataRecipientId === String(active._id)) ||
+        (data.room && data.room === [currentUserId, String(active._id)].sort().join('_'))
+      );
+
+      if (isForActiveChat) {
         setMessages((prev) => {
           const isDuplicate = prev.some(m => 
-            (m._id && data._id && String(m._id) === String(data._id)) ||
-            (String(m.senderId) === dataSenderId && m.content === data.content && m.time === data.time)
+            (m.clientMsgId && data.clientMsgId && m.clientMsgId === data.clientMsgId) ||
+            (m._id && data._id && String(m._id) === String(data._id))
           );
           if (isDuplicate) return prev;
           return [...prev, data];
@@ -167,8 +194,10 @@ const Chat = () => {
     const room = [currentUserId, partnerId].sort().join('_');
     const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const contentToSend = input.trim();
+    const clientMsgId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     const msgData = {
+      clientMsgId,
       room,
       sender: user.username,
       senderId: currentUserId,
@@ -188,14 +217,8 @@ const Chat = () => {
       room
     }).catch(err => console.error(err));
 
-    // Update messages locally (with duplicate guard)
-    setMessages((prev) => {
-      const exists = prev.some(m => 
-        String(m.senderId) === currentUserId && m.content === contentToSend && m.time === currentTime
-      );
-      if (exists) return prev;
-      return [...prev, msgData];
-    });
+    // Update messages locally
+    setMessages((prev) => [...prev, msgData]);
 
     setInput('');
     socket.emit('typing', { room, username: user.username, isTyping: false });

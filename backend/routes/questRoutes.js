@@ -10,9 +10,11 @@ router.get('/', protect, getQuests);
 router.post('/claim/:id', protect, async (req, res) => {
   try {
     const quest = await Quest.findById(req.params.id);
-    const user = await User.findById(req.user.id);
+    const userId = req.user.id || req.user._id;
+    const user = await User.findById(userId);
     
     if (!quest) return res.status(404).json({ message: "Quest not found" });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     // Check if already completed today
     const today = new Date().setHours(0,0,0,0);

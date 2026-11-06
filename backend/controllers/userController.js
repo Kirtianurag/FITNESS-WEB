@@ -78,17 +78,18 @@ exports.saveMessage = async (req, res) => {
 exports.updateXP = async (req, res) => {
   const { xpToAdd } = req.body;
   try {
-    const user = await User.findById(req.user.id);
+    const userId = req.user.id || req.user._id;
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    user.xp += xpToAdd;
+    user.xp = (user.xp || 0) + Number(xpToAdd || 0);
     
     // Simple level up logic: every 1000 XP is a level
     const newLevel = Math.floor(user.xp / 1000) + 1;
     user.level = newLevel;
 
     await user.save();
-    res.json({ xp: user.xp, level: user.level });
+    res.json({ xp: user.xp, level: user.level, user });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

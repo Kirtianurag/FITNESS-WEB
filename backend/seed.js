@@ -2,7 +2,9 @@ const mongoose = require('mongoose');
 const Quest = require('./models/Quest');
 const dotenv = require('dotenv');
 
-dotenv.config();
+const path = require('path');
+dotenv.config({ path: path.join(__dirname, '.env') });
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/fitness-gamified';
 
 const quests = [
   {
@@ -35,7 +37,7 @@ const quests = [
   }
 ];
 
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(MONGO_URI)
   .then(async () => {
     console.log('MongoDB connected for seeding');
     await Quest.deleteMany({});

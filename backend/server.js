@@ -35,18 +35,40 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined personal room: ${userId}`);
   });
 
+  socket.on('join_room', (room) => {
+    socket.join(room);
+    console.log(`User ${socket.id} joined room: ${room}`);
+  });
+
+  socket.on('leave_room', (room) => {
+    socket.leave(room);
+    console.log(`User ${socket.id} left room: ${room}`);
+  });
+
   socket.on('send_message', (data) => {
-    // Send to the chat room for live chat
-    socket.to(data.room).emit('receive_message', data);
+    console.log(`Message sent in room ${data.room} from ${data.senderId} to ${data.recipientId}`);
     
-    // Also send to the recipient's personal room for the notification dot
+    // Broadcast to room and/or recipient personal room
+    const targets = [];
+    if (data.room) targets.push(data.room);
+    if (data.recipientId) targets.push(data.recipientId);
+
+    if (targets.length > 0) {
+      // socket.to(targets) sends to everyone in data.room and recipient personal room
+      // Socket.IO deduplicates automatically so user only gets it once
+      socket.to(targets).emit('receive_message', data);
+    }
+    
+    // Also trigger notification dot in recipient's personal room
     if (data.recipientId) {
       socket.to(data.recipientId).emit('new_message_notification', data);
     }
   });
 
   socket.on('typing', (data) => {
-    socket.to(data.room).emit('user_typing', data);
+    if (data.room) {
+      socket.to(data.room).emit('user_typing', data);
+    }
   });
 
   socket.on('disconnect', () => {

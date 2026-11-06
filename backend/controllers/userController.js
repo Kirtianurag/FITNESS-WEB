@@ -3,8 +3,46 @@ const Message = require('../models/Message');
 
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({ _id: { $ne: req.user.id } }).select('username avatar level streak');
-    res.json(users);
+    const currentUserId = req.user.id;
+    const users = await User.find({ _id: { $ne: currentUserId } }).select('username avatar level streak');
+
+    // Find all recent messages involving current user to order users by latest activity
+    const recentMessages = await Message.find({
+      $or: [{ sender: currentUserId }, { receiver: currentUserId }]
+    }).sort({ createdAt: -1 });
+
+    const lastMessageMap = {};
+    for (const msg of recentMessages) {
+      const otherId = msg.sender.toString() === currentUserId.toString() 
+        ? msg.receiver?.toString() 
+        : msg.sender.toString();
+        
+      if (otherId && !lastMessageMap[otherId]) {
+        lastMessageMap[otherId] = {
+          content: msg.content,
+          createdAt: msg.createdAt,
+          time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+      }
+    }
+
+    const formattedUsers = users.map(u => {
+      const uObj = u.toObject();
+      const lastInfo = lastMessageMap[u._id.toString()];
+      if (lastInfo) {
+        uObj.lastMessage = lastInfo.content;
+        uObj.lastMessageTime = lastInfo.time;
+        uObj.lastTimestamp = new Date(lastInfo.createdAt).getTime();
+      } else {
+        uObj.lastTimestamp = 0;
+      }
+      return uObj;
+    });
+
+    // Sort users: Most recently messaged users appear at the top
+    formattedUsers.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+    res.json(formattedUsers);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

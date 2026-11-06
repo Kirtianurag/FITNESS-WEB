@@ -18,6 +18,15 @@ const Chat = () => {
   const [search, setSearch] = useState('');
   const scrollRef = useRef();
 
+  // Refs to prevent stale closures in socket callbacks
+  const activeChatRef = useRef(activeChat);
+  const currentRoomRef = useRef(null);
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
+  // Initial fetch of users
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -30,37 +39,81 @@ const Chat = () => {
     fetchUsers();
   }, []);
 
+  // Room switching and message loading when activeChat changes
   useEffect(() => {
-    if (activeChat) {
-      const room = [user._id, activeChat._id].sort().join('_');
-      socket.emit('join_room', room);
+    if (!activeChat || !user?._id) return;
 
-      const fetchMessages = async () => {
-        try {
-          const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${activeChat._id}`);
-          // Map backend structure to frontend structure
-          const formatted = data.map(m => ({
-            sender: m.sender === user._id ? user.username : activeChat.username,
-            content: m.content,
-            time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            avatar: m.sender === user._id ? user.avatar : activeChat.avatar
-          }));
-          setMessages(formatted);
-        } catch (err) {
-          console.error(err);
-        }
-      };
-      fetchMessages();
+    const newRoom = [user._id, activeChat._id].sort().join('_');
+
+    if (currentRoomRef.current && currentRoomRef.current !== newRoom) {
+      socket.emit('leave_room', currentRoomRef.current);
     }
+    currentRoomRef.current = newRoom;
+    socket.emit('join_room', newRoom);
 
-    socket.on('receive_message', (data) => {
-      if (activeChat && (data.senderId === activeChat._id || data.senderId === user._id)) {
-        setMessages((prev) => [...prev, data]);
+    const fetchMessages = async () => {
+      try {
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages/${activeChat._id}`);
+        const formatted = data.map(m => ({
+          sender: m.sender === user._id ? user.username : activeChat.username,
+          senderId: m.sender,
+          recipientId: m.receiver,
+          content: m.content,
+          time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          avatar: m.sender === user._id ? user.avatar : activeChat.avatar
+        }));
+        setMessages(formatted);
+      } catch (err) {
+        console.error(err);
       }
-    });
+    };
+    fetchMessages();
+  }, [activeChat?._id, user?._id]);
 
-    socket.on('user_typing', (data) => {
-      if (activeChat && data.username === activeChat.username) {
+  // Persistent Socket Listeners for Real-Time Messages and Typing
+  useEffect(() => {
+    if (!user?._id) return;
+
+    // Join personal room for real-time delivery even when not in chat room
+    socket.emit('join_personal_room', user._id);
+
+    const handleReceiveMessage = (data) => {
+      const active = activeChatRef.current;
+      
+      // 1. If currently in conversation with this sender, display message live
+      if (active && (data.senderId === active._id || data.senderId === user._id)) {
+        setMessages((prev) => {
+          const isDuplicate = prev.some(m => 
+            (m._id && data._id && m._id === data._id) ||
+            (m.senderId === data.senderId && m.content === data.content && m.time === data.time)
+          );
+          if (isDuplicate) return prev;
+          return [...prev, data];
+        });
+      }
+
+      // 2. Bring the conversation partner to the TOP of the chat list
+      const partnerId = data.senderId === user._id ? data.recipientId : data.senderId;
+      setUsers((prevUsers) => {
+        const partnerIndex = prevUsers.findIndex(u => u._id === partnerId);
+        if (partnerIndex === -1) return prevUsers;
+        const partner = prevUsers[partnerIndex];
+        const isCurrentActive = activeChatRef.current && activeChatRef.current._id === partnerId;
+
+        const updatedPartner = {
+          ...partner,
+          lastMessage: data.content,
+          lastMessageTime: data.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          unreadCount: isCurrentActive ? 0 : ((partner.unreadCount || 0) + 1)
+        };
+
+        const others = prevUsers.filter(u => u._id !== partnerId);
+        return [updatedPartner, ...others];
+      });
+    };
+
+    const handleUserTyping = (data) => {
+      if (activeChatRef.current && data.username === activeChatRef.current.username) {
         if (data.isTyping) {
           setTypingUser(data.username);
           setIsTyping(true);
@@ -68,46 +121,73 @@ const Chat = () => {
           setIsTyping(false);
         }
       }
-    });
+    };
+
+    socket.on('receive_message', handleReceiveMessage);
+    socket.on('user_typing', handleUserTyping);
 
     return () => {
-      socket.off('receive_message');
-      socket.off('user_typing');
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('user_typing', handleUserTyping);
     };
-  }, [activeChat, user._id]);
+  }, [user?._id]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleSelectChat = (u) => {
+    setActiveChat(u);
+    // Clear unread count for this user
+    setUsers((prev) => prev.map(item => item._id === u._id ? { ...item, unreadCount: 0 } : item));
+  };
+
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (input.trim() && activeChat) {
-      const room = [user._id, activeChat._id].sort().join('_');
-      const msgData = {
-        room,
-        sender: user.username,
-        senderId: user._id,
-        recipientId: activeChat._id,
-        content: input,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        avatar: user.avatar
+    if (!input.trim() || !activeChat) return;
+
+    const room = [user._id, activeChat._id].sort().join('_');
+    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const contentToSend = input.trim();
+
+    const msgData = {
+      room,
+      sender: user.username,
+      senderId: user._id,
+      recipientId: activeChat._id,
+      content: contentToSend,
+      time: currentTime,
+      avatar: user.avatar
+    };
+
+    // Emit live to socket
+    socket.emit('send_message', msgData);
+
+    // Save to database
+    axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages`, {
+      recipientId: activeChat._id,
+      content: contentToSend,
+      room
+    }).catch(err => console.error(err));
+
+    // Update messages locally
+    setMessages((prev) => [...prev, msgData]);
+    setInput('');
+    socket.emit('typing', { room, username: user.username, isTyping: false });
+
+    // Move active chat partner to the top of the sidebar list
+    setUsers((prevUsers) => {
+      const partner = prevUsers.find(u => u._id === activeChat._id);
+      if (!partner) return prevUsers;
+      const updatedPartner = {
+        ...partner,
+        lastMessage: contentToSend,
+        lastMessageTime: currentTime,
+        unreadCount: 0
       };
-
-      // Emit to socket
-      socket.emit('send_message', msgData);
-      
-      // Save to database
-      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/messages`, {
-        recipientId: activeChat._id,
-        content: input,
-        room
-      });
-
-      setMessages((prev) => [...prev, msgData]);
-      setInput('');
-      socket.emit('typing', { room, username: user.username, isTyping: false });
-    }
+      const others = prevUsers.filter(u => u._id !== activeChat._id);
+      return [updatedPartner, ...others];
+    });
   };
 
   const handleTyping = (e) => {
@@ -145,7 +225,7 @@ const Chat = () => {
             {filteredUsers.length > 0 ? filteredUsers.map((u) => (
               <div 
                 key={u._id} 
-                onClick={() => setActiveChat(u)}
+                onClick={() => handleSelectChat(u)}
                 style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
@@ -159,18 +239,61 @@ const Chat = () => {
                 }}
                 className="user-list-item"
               >
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', flexShrink: 0 }}>
                   <img src={u.avatar} style={{ width: '48px', height: '48px', borderRadius: '14px', background: '#f1f5f9' }} alt="" />
                   <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', width: '12px', height: '12px', background: '#10b981', border: '2px solid white', borderRadius: '50%' }}></div>
                 </div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '15px', fontWeight: '800', color: activeChat?._id === u._id ? 'var(--primary)' : '#1e293b' }}>{u.username}</span>
-                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8' }}>Lvl {u.level}</span>
+                    <span style={{ 
+                      fontSize: '15px', 
+                      fontWeight: '800', 
+                      color: activeChat?._id === u._id ? 'var(--primary)' : '#1e293b',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}>
+                      {u.username}
+                    </span>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', flexShrink: 0, marginLeft: '6px' }}>
+                      {u.lastMessageTime || `Lvl ${u.level}`}
+                    </span>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                     <Flame size={12} fill="#f97316" color="#f97316" /> {u.streak} day streak
-                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px' }}>
+                    <p style={{ 
+                      fontSize: '12px', 
+                      color: u.unreadCount ? '#0f172a' : '#64748b', 
+                      fontWeight: u.unreadCount ? '700' : '500', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '4px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      margin: 0
+                    }}>
+                      {u.lastMessage ? (
+                        u.lastMessage
+                      ) : (
+                        <><Flame size={12} fill="#f97316" color="#f97316" /> {u.streak} day streak</>
+                      )}
+                    </p>
+                    {u.unreadCount > 0 && (
+                      <span style={{
+                        background: 'var(--primary)',
+                        color: 'white',
+                        fontSize: '10px',
+                        fontWeight: '800',
+                        borderRadius: '9999px',
+                        padding: '2px 7px',
+                        marginLeft: '6px',
+                        flexShrink: 0,
+                        boxShadow: '0 2px 6px rgba(14, 165, 233, 0.4)'
+                      }}>
+                        {u.unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             )) : (
